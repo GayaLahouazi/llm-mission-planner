@@ -1,0 +1,2 @@
+# DRN-05 No-fly zones and safety margin
+No-fly zones are modelled as circles. A permanent zone must never be crossed. A temporary zone may be crossed only when it is inactive; the whole leg must be flown outside its active period. In both cases a lateral safety margin of 0.3 km is added to the published radius: a leg passing closer than radius + 0.3 km to the centre is considered as crossing the zone. Straight legs only: the drone flies in a straight line between consecutive waypoints.

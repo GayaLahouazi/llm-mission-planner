@@ -1,0 +1,2 @@
+# DRN-02 Time windows and waiting
+Some waypoints have an inspection time window [earliest, latest] in minutes from take-off, for instance because the site is only accessible or lit during that period. The inspection must start inside the window. Arriving early is allowed: the drone hovers on site and waits until the window opens. Arriving after the window closes makes the plan invalid. The inspection itself lasts the service time given for the waypoint.
