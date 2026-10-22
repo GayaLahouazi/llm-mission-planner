@@ -55,18 +55,26 @@ class Scripted:
         return self.answers.pop(0)
 
 
-def parse_order(text: str) -> list[str] | None:
-    """Extract the JSON plan from a free-form answer (models sometimes add prose or ``` fences)."""
+def parse_order(text: str, drop_depot: bool = True) -> list[str] | None:
+    """Extract the JSON plan from a free-form answer (models sometimes add prose or ``` fences).
+
+    The depot is implicit (procedures DRN-01 and DRN-10). Small models often add it at the start or the end of the
+    route anyway; with `drop_depot` (default) those mentions are removed before verification, so that the benchmark
+    measures planning rather than formatting. `drop_depot=False` gives the strict behaviour."""
     m = re.search(r"\{.*\}", text, re.S)
+    order = None
     if m:
         try:
-            order = json.loads(m.group(0)).get("order")
-            if isinstance(order, list):
-                return [str(o).strip() for o in order]
+            raw = json.loads(m.group(0)).get("order")
+            if isinstance(raw, list):
+                order = [str(o).strip() for o in raw]
         except (json.JSONDecodeError, AttributeError):
             pass
-    names = re.findall(r"\bW\d+\b", text)          # fallback: list of waypoint names in the text
-    return names or None
+    if order is None:
+        order = re.findall(r"\bW\d+\b", text)       # fallback: list of waypoint names in the text
+    if drop_depot:
+        order = [o for o in order if o.lower() != "depot"]
+    return order or None
 
 
 @dataclass
@@ -80,7 +88,7 @@ class PlanResult:
     transcript: list[dict] = field(default_factory=list)
 
 
-def plan(s: Scenario, llm, use_rag: bool = True, max_repairs: int = 3) -> PlanResult:
+def plan(s: Scenario, llm, use_rag: bool = True, max_repairs: int = 3, drop_depot: bool = True) -> PlanResult:
     """1 proposal + up to `max_repairs` corrections guided by the verifier's feedback."""
     t0 = time.time()
     text = brief(s)
@@ -92,7 +100,7 @@ def plan(s: Scenario, llm, use_rag: bool = True, max_repairs: int = 3) -> PlanRe
     for it in range(max_repairs + 1):
         answer = llm.chat(messages)
         messages.append({"role": "assistant", "content": answer})
-        order = parse_order(answer)
+        order = parse_order(answer, drop_depot)
         verdict = verify(s, order) if order else Verdict(False, ["answer is not a valid JSON plan"])
         if it == 0:
             first_valid = verdict.valid
