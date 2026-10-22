@@ -65,6 +65,12 @@ def test_parse_order_handles_prose_and_fences():
     assert parse_order("I would go W3 then W1") == ["W3", "W1"]
 
 
+def test_parse_order_drops_implicit_depot_unless_strict():
+    answer = '{"order": ["W2", "W1", "depot"]}'
+    assert parse_order(answer) == ["W2", "W1"]
+    assert parse_order(answer, drop_depot=False) == ["W2", "W1", "depot"]
+
+
 def test_repair_loop_uses_verifier_feedback():
     llm = Scripted(['{"order": ["W1", "W2"]}', '{"order": ["W2", "W1"]}'])
     r = plan(tiny(), llm, use_rag=False, max_repairs=2)
