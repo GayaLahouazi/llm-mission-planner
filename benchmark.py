@@ -77,7 +77,7 @@ def main(a):
                                     ("LLM + RAG + Z3 repair loop (<=3)", True, 3)):
             rows = []
             for i, (s, _, opt_d) in enumerate(scenarios):
-                r = llm_mod.plan(s, model, use_rag=rag, max_repairs=repairs)
+                r = llm_mod.plan(s, model, use_rag=rag, max_repairs=repairs, drop_depot=not a.strict_format)
                 rows.append({"valid": r.verdict.valid, "distance": r.verdict.distance, "optimal": opt_d,
                              "iterations": r.iterations, "first_valid": r.first_valid, "seconds": r.seconds})
                 print(f"{label:35s} scenario {i:3d} valid={r.verdict.valid} repairs={r.iterations}", flush=True)
@@ -85,7 +85,7 @@ def main(a):
 
     out = Path("results")
     out.mkdir(exist_ok=True)
-    tag = "classical" if not a.llm else a.model.replace("/", "_").replace(":", "_")
+    tag = "classical" if not a.llm else a.model.replace("/", "_").replace(":", "_") + ("_strict" if a.strict_format else "")
     (out / f"benchmark_{tag}.json").write_text(json.dumps(results, indent=2))
     print(json.dumps(results, indent=2))
 
@@ -97,4 +97,6 @@ if __name__ == "__main__":
     p.add_argument("--llm", choices=["openai", "hf"], default=None)
     p.add_argument("--model", default="qwen2.5:7b")
     p.add_argument("--base-url", default="http://localhost:11434/v1")
+    p.add_argument("--strict-format", action="store_true",
+                   help="reject plans that mention the (implicit) depot instead of dropping it")
     main(p.parse_args())
