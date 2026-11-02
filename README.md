@@ -70,9 +70,42 @@ by them and the battery rule (mentioned once) is drowned. Splitting the brief in
 
 ### LLM planner
 
-Run `notebooks/colab_llm_benchmark.ipynb` on a free Colab T4 GPU (Qwen2.5-3B-Instruct, open weights).
-It compares *LLM alone*, *LLM + RAG* and *LLM + RAG + Z3 repair loop* on the same missions and reports valid-plan rate,
-number of repairs and gap to optimal. **Results will be added here after the run.**
+Run on a free Colab T4 GPU, **30 random missions** (seeds 0–29, same generator settings), greedy decoding, at most
+160 new tokens, up to 3 repairs. Qwen2.5-3B-Instruct (fp16) runs with `notebooks/colab_llm_benchmark.ipynb`;
+Qwen2.5-7B-Instruct was loaded in 4-bit (NF4, bitsandbytes) to fit the GPU and plugged into the same benchmark code.
+The classical planners were re-run on the same 30 missions for comparison.
+
+| Planner | Valid plans | Mean gap to optimal (valid plans) | Mean time / mission |
+|---|---:|---:|---:|
+| Nearest neighbour | 13 % (4/30) | +7.5 % | – |
+| Earliest deadline first | 40 % (12/30) | +8.7 % | – |
+| Exact branch & bound | 100 % | 0 % (reference) | – |
+| Qwen2.5-3B – LLM alone | 0 % | – | 2.7 s |
+| Qwen2.5-3B – LLM + RAG | 0 % | – | 3.7 s |
+| Qwen2.5-3B – LLM + RAG + Z3 repair (≤ 3) | 0 % | – | 15.9 s |
+| Qwen2.5-7B (4-bit) – LLM alone | 10 % (3/30) | +19.1 % | 2.5 s |
+| Qwen2.5-7B (4-bit) – LLM + RAG | 7 % (2/30) | +24.9 % | 2.9 s |
+| Qwen2.5-7B (4-bit) – LLM + RAG + Z3 repair (≤ 3) | 13 % (4/30) | +16.2 % | 11.8 s |
+
+Z3 verification took 3.7–4.0 ms per plan in these runs. With the 7B model, 2/30 first answers were valid and 4/30
+after repairs (1.25 repairs on average for the plans that ended valid).
+
+What this shows:
+
+* **The verifier is what makes the system safe:** every invalid LLM plan was caught by Z3 and turned into readable
+  reasons; none was returned as valid.
+* **Small open LLMs cannot compute a constrained route.** They lose to a simple rule (earliest deadline first, 40 %)
+  and to the exact solver. Typical failure (3B, mission 0): the model lists the waypoints in index order (W1 … W7) and,
+  when told "route length 55.6 km exceeds the usable range 51.0 km", only moves `depot` in the list, so the route
+  does not change.
+* **Repair feedback helps a bigger model** (7B: 2 → 4 valid plans) but not a small one: model size and feedback
+  quality both matter.
+* **Consequence for the design:** the LLM's place is to read the brief and the procedures and to *orchestrate*
+  solvers (choose and parameterise the exact planner, explain the result), not to replace them. This matches the
+  LLM-Modulo argument of Kambhampati et al.
+
+Caveats: 30 missions only, so differences of one or two missions (e.g. 7B alone vs + RAG) are within noise;
+4-bit quantisation may cost the 7B some accuracy.
 
 ## Run it
 
@@ -98,8 +131,10 @@ python benchmark.py --llm openai --model qwen2.5:7b --base-url http://localhost:
 
 ## Possible extensions
 
-Several drones (assignment + routing), uncertain travel times (chance constraints), an exact MILP formulation to
-compare with branch & bound, and fine-tuning a small LLM on solver-generated plans.
+An LLM that calls the exact planner as a tool (choosing and parameterising it) instead of writing the route itself,
+richer repair feedback (which leg makes the route too long), larger models, several drones (assignment + routing),
+uncertain travel times (chance constraints), an exact MILP formulation to compare with branch & bound, and
+fine-tuning a small LLM on solver-generated plans.
 
 ## References
 
