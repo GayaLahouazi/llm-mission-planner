@@ -37,7 +37,7 @@ The verifier never trusts the LLM: **a plan is only returned if Z3 proves it sat
 | `planner/rag.py` | **BM25 written from scratch** + query decomposition over `docs/procedures/` |
 | `planner/llm.py` | LLM back-ends (any OpenAI-compatible server: Ollama, vLLM, Groq, Mistral…; or Hugging Face `transformers`) and the propose → verify → repair loop |
 | `benchmark.py` | evaluation on random feasible missions |
-| `tests/` | 11 unit tests, including a cross-check: the Z3 verifier and the hand-written simulator must agree on every plan |
+| `tests/` | 14 unit tests, including a cross-check (the Z3 verifier and the hand-written simulator must agree) and regression tests for the two bugs fixed on 2026-11-02 |
 
 ## Results
 
@@ -48,11 +48,11 @@ Every mission is guaranteed feasible (the exact planner found a valid route).
 
 | Planner | Valid plans | Mean gap to optimal distance (valid plans) |
 |---|---:|---:|
-| Nearest neighbour (greedy) | 16 % | +7.7 % |
-| Earliest deadline first | 34 % | +8.1 % |
+| Nearest neighbour (greedy) | 14 % | +3.3 % |
+| Earliest deadline first | 30 % | +8.0 % |
 | Exact branch & bound | 100 % | 0 % (reference) |
 
-* Z3 verifies a plan in **3.8 ms** on average (CPU), so it can sit inside an interactive loop.
+* Z3 verifies a plan in **4–5 ms** on average (laptop CPU), so it can sit inside an interactive loop.
 * The greedy heuristics fail on most missions: time windows and temporary zones make the problem
   much harder than a plain travelling-salesman tour. This is the gap the LLM + verifier loop targets.
 
@@ -65,15 +65,18 @@ Recall@5 of the 4 procedures that really constrain the plan (time windows, batte
 | Whole brief as one BM25 query | 75 % (the battery-reserve rule is never retrieved) |
 | **Query decomposition** (one query per clause, union of the best hits) | **100 %** |
 
-Why: the brief repeats words like *service*, *time window* on every waypoint line, so a single query is dominated
-by them and the battery rule (mentioned once) is drowned. Splitting the brief into clauses fixes it.
+Why: BM25 adds up the scores of every query term a document contains. The whole brief has 36 distinct terms, mostly
+generic ones (*drone*, *depot*, *mission*, *time*, *zones*…), so the procedures that share many of them fill the top 5,
+and the battery rule, which only shares *battery* and *range*, ranks 6th on all 50 missions. Querying each clause
+separately lets the clause "battery range 60 km" retrieve its own procedure.
 
 ### LLM planner
 
 Run on a free Colab T4 GPU, **30 random missions** (seeds 0–29, same generator settings), greedy decoding, at most
 160 new tokens, up to 3 repairs. Qwen2.5-3B-Instruct (fp16) runs with `notebooks/colab_llm_benchmark.ipynb`;
 Qwen2.5-7B-Instruct was loaded in 4-bit (NF4, bitsandbytes) to fit the GPU and plugged into the same benchmark code.
-The classical planners were re-run on the same 30 missions for comparison.
+The classical planners were re-run on the same 30 missions for comparison. These runs predate the fixes below
+(commit `5c6e42e`): 7 of the 30 missions are drawn differently since, so the table will be refreshed at the next run.
 
 | Planner | Valid plans | Mean gap to optimal (valid plans) | Mean time / mission |
 |---|---:|---:|---:|
@@ -107,11 +110,27 @@ What this shows:
 Caveats: 30 missions only, so differences of one or two missions (e.g. 7B alone vs + RAG) are within noise;
 4-bit quantisation may cost the 7B some accuracy.
 
+### Fixes of 2026-11-02
+
+An exhaustive cross-check (all 5,040 visiting orders of each of the 50 benchmark missions, checked by the Z3 verifier,
+the simulator and the branch & bound) found two modelling bugs. Both are fixed and covered by regression tests.
+
+* **Hovering in front of a temporary zone.** The Z3 model tied take-off to the end of the inspection. A plan where
+  the drone inspects a waypoint inside its time window, then hovers until a zone closes (allowed by DRN-04), was
+  rejected by Z3 but accepted by the simulator: 10 of the 6,309 orders the simulator found feasible. Take-off times
+  are now separate variables, and Z3 and the simulator agree on every order checked.
+* **Branch & bound pruning.** The feasibility check of a partial route added a return leg to the depot, so a
+  waypoint whose straight line home crosses a permanent zone could never be visited, even in the middle of the route.
+  The generator discarded such missions as infeasible, which changed 9 of the 50 benchmark missions. The partial
+  check now stops at the last waypoint.
+
+The classical and retrieval results above come from the fixed code.
+
 ## Run it
 
 ```bash
 pip install -r requirements.txt
-python -m pytest -q tests            # 11 tests, < 1 s
+python -m pytest -q tests            # 14 tests, ~1 s
 python benchmark.py                  # classical planners + retrieval, ~1 min on CPU
 
 # with a local LLM served by Ollama (https://ollama.com)
