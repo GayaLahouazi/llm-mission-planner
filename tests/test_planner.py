@@ -48,6 +48,15 @@ def test_battery_reserve_is_enforced():
     assert not v.valid and any("usable range" in p for p in v.problems)
 
 
+def test_drone_may_hover_after_inspection_in_front_of_active_zone():
+    # W1 must be inspected by t = 5 but leg W1 -> W2 crosses Z1 until t = 30: inspect, then hover (DRN-04)
+    s = Scenario(depot=(0, 0), waypoints=[Waypoint("W1", 4, 0, 0, 5), Waypoint("W2", 4, 8)], speed=1.0,
+                 battery_range=100, deadline=100, zones=[NoFlyZone("Z1", 4, 4, 1.0, start=0, end=30)])
+    v = verify(s, ["W1", "W2"])
+    assert v.valid and v.schedule["W1"] <= 5 and v.schedule["W2"] >= 38
+    assert simulate(s, ["W1", "W2"])[0] and exact_plan(s)[0] == ["W1", "W2"]
+
+
 def test_simulator_and_z3_agree_on_random_missions():
     for seed in range(8):
         s, order, _ = generate_feasible(seed, n_waypoints=5)
@@ -58,6 +67,15 @@ def test_simulator_and_z3_agree_on_random_missions():
 def test_exact_plan_is_optimal_on_small_case():
     order, d = exact_plan(tiny())
     assert order == ["W2", "W1"] and math.isclose(d, 4 + 4 * math.sqrt(2) + 4)
+
+
+def test_exact_plan_visits_waypoint_whose_line_home_is_blocked():
+    # the straight line W1 -> depot crosses permanent zone Z1: W1 can only be visited in the middle of the route
+    s = Scenario(depot=(0, 0), waypoints=[Waypoint("W1", 10, 0), Waypoint("W2", 5, 5), Waypoint("W3", 5, -5)],
+                 zones=[NoFlyZone("Z1", 5, 0, 1.0)], speed=1.0, battery_range=100, deadline=100)
+    order, d = exact_plan(s)
+    assert order is not None and order[1] == "W1" and verify(s, order).valid
+    assert math.isclose(d, 20 * math.sqrt(2))
 
 
 def test_parse_order_handles_prose_and_fences():
