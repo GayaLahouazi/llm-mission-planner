@@ -6,9 +6,9 @@
 
 `simulate` computes the earliest feasible schedule of a fixed order. Starting
 every leg as early as possible is optimal here (waiting never helps later
-stops), except in front of an active temporary zone, where we wait until it
-closes. It is an independent implementation from the Z3 verifier: the tests
-check that both always agree.
+stops), except in front of an active temporary zone, where the drone hovers
+after its inspection until the zone closes (DRN-04). It is an independent
+implementation from the Z3 verifier: the tests check that both always agree.
 """
 from __future__ import annotations
 
@@ -17,11 +17,13 @@ import math
 from .scenario import Scenario, dist, segment_hits_circle
 
 
-def simulate(s: Scenario, order: list[str]):
-    """Return (feasible, total_distance, end_time) with earliest departures."""
+def simulate(s: Scenario, order: list[str], return_home: bool = True):
+    """Return (feasible, total_distance, end_time) with earliest departures.
+
+    With `return_home=False` the route stops at the last waypoint (partial routes)."""
     wp = s.by_name()
     pos, t, total = s.depot, 0.0, 0.0
-    for name in order + ["DEPOT"]:
+    for name in order + (["DEPOT"] if return_home else []):
         nxt = s.point(name)
         travel = dist(pos, nxt) / s.speed
         for _ in range(len(s.zones) + 1):           # repeat: waiting for one zone may hit another
@@ -72,11 +74,14 @@ def exact_plan(s: Scenario):
 
 
 def simulate_prefix(s: Scenario, prefix: list[str]):
-    """Feasibility of a partial route (windows only; deadline/battery checked at the end)."""
+    """Feasibility of a partial route: time windows and zones on the legs flown so far.
+
+    The return leg is not included: the drone will not fly home from the last waypoint of a
+    prefix, and deadline/battery are checked on the complete route."""
     if not prefix:
         return True, 0.0, 0.0
     tmp = Scenario(s.depot, s.waypoints, s.zones, s.speed, math.inf, 0.0, s.zone_margin, math.inf)
-    ok, total, t = simulate(tmp, prefix)
+    ok, total, t = simulate(tmp, prefix, return_home=False)
     return ok, total, t
 
 

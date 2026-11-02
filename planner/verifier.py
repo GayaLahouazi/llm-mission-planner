@@ -9,8 +9,13 @@ hold together. They are turned into short sentences that are sent back to
 the LLM so that it can repair its plan.
 
 Note on the zone constraint: a temporary no-fly zone gives a disjunction
-(leave before it activates OR after it closes), which is exactly where an
-SMT solver is more convenient than hand-written checks.
+(fly the whole leg before it activates OR take off after it closes), which is
+exactly where an SMT solver is more convenient than hand-written checks.
+
+Waiting is allowed in two places, as in the procedures: on site before an
+inspection, until the time window opens (DRN-02), and after an inspection,
+before taking off, in front of an active zone (DRN-04). Service start and
+take-off times are therefore separate variables.
 """
 from __future__ import annotations
 
@@ -61,7 +66,8 @@ def verify(s: Scenario, order: list[str]) -> Verdict:
     # ---- SMT encoding ------------------------------------------------------------------
     solver = z3.Solver()
     solver.set("core.minimize", True)
-    start = [z3.Real(f"start_{n}_{k}") for k, n in enumerate(stops)]   # service start (depot: departure)
+    start = [z3.Real(f"start_{n}_{k}") for k, n in enumerate(stops)]      # service start (depot: mission start)
+    depart = [z3.Real(f"depart_{n}_{k}") for k, n in enumerate(stops[:-1])]   # take-off from each stop
     explain: dict[str, str] = {}
 
     def track(label: str, constraint, message: str):
@@ -72,10 +78,9 @@ def verify(s: Scenario, order: list[str]) -> Verdict:
     for k in range(len(stops) - 1):
         a, b = stops[k], stops[k + 1]
         service = 0.0 if a == "DEPOT" else wp[a].service
-        depart = start[k] + service
         travel = legs[k] / s.speed
-        # cannot start service at b before arriving there (waiting is allowed)
-        solver.add(start[k + 1] >= depart + travel)
+        # take off after the inspection (hovering allowed), start service at b after arriving (waiting allowed)
+        solver.add(depart[k] >= start[k] + service, start[k + 1] >= depart[k] + travel)
         for z in s.zones:
             if not segment_hits_circle(pts[k], pts[k + 1], (z.x, z.y), z.r + s.zone_margin):
                 continue
@@ -84,7 +89,7 @@ def verify(s: Scenario, order: list[str]) -> Verdict:
                 track(label, z3.BoolVal(False),
                       f"leg {a} -> {b} crosses no-fly zone {z.name} (permanent, incl. {s.zone_margin} km margin)")
             else:
-                track(label, z3.Or(depart + travel <= z.start, depart >= z.end),
+                track(label, z3.Or(depart[k] + travel <= z.start, depart[k] >= z.end),
                       f"leg {a} -> {b} crosses no-fly zone {z.name}, which is active during "
                       f"[{z.start:g}, {z.end:g}) min: fly it entirely outside that period")
     for k, n in enumerate(stops[1:-1], start=1):
